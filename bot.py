@@ -24,12 +24,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = int(os.getenv("GUILD_ID") or 0) or None          # instant command sync in one server
-STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID") or 0) or None  # role allowed to manage flights
-ANNOUNCE_CHANNEL_ID = int(os.getenv("ANNOUNCE_CHANNEL_ID") or 0) or None
-PING_ROLE_ID = int(os.getenv("PING_ROLE_ID") or 0) or None    # optional role pinged on announcements
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID") or 0) or None  # optional staff log channel
 DB_PATH = os.getenv("DB_PATH", "flights.db")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
