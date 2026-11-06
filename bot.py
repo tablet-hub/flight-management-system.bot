@@ -24,7 +24,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+TOKEN = os.getenv("MTU2NzkwNDg4ODQ0NzMxMTk1Ng.GNUdoc.E_EZFPIbioSrzqDwtmC1Vn5M-PDcMH5SBxpDg4")
+GUILD_ID = int(os.getenv("1552773061894348952") or 0) or None
+STAFF_ROLE_ID = int(os.getenv("1554508013967114342") or 0) or None
+ANNOUNCE_CHANNEL_ID = int(os.getenv("1554496632890986498") or 0) or None
+PING_ROLE_ID = int(os.getenv("1554508013967114342") or 0) or None
+LOG_CHANNEL_ID = int(os.getenv("1554496632890986498") or 0) or None
 DB_PATH = os.getenv("DB_PATH", "flights.db")
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("flightbot")
