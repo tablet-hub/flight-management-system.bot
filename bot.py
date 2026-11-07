@@ -24,12 +24,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv("MTU2NzkwNDg4ODQ0NzMxMTk1Ng.GNUdoc.E_EZFPIbioSrzqDwtmC1Vn5M-PDcMH5SBxpDg4")
-GUILD_ID = int(os.getenv("1552773061894348952") or 0) or None
-STAFF_ROLE_ID = int(os.getenv("1554508013967114342") or 0) or None
-ANNOUNCE_CHANNEL_ID = int(os.getenv("1554496632890986498") or 0) or None
-PING_ROLE_ID = int(os.getenv("1554508013967114342") or 0) or None
-LOG_CHANNEL_ID = int(os.getenv("1554496632890986498") or 0) or None
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = int(os.getenv("GUILD_ID", "1552773061894348952") or 0) or None
+STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "1554508013967114342") or 0) or None
+ANNOUNCE_CHANNEL_ID = int(os.getenv("ANNOUNCE_CHANNEL_ID", "1554496632890986498") or 0) or None
+PING_ROLE_ID = int(os.getenv("PING_ROLE_ID", "1554508013967114342") or 0) or None
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "1554496632890986498") or 0) or None
 DB_PATH = os.getenv("DB_PATH", "flights.db")
 
 
