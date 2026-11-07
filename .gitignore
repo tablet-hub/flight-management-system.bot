@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Python and bot runtime files
+__pycache__/
+*.py[cod]
+flights.db
+flights.db-shm
+flights.db-wal
