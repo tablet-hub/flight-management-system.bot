@@ -15,7 +15,7 @@
 |---|---|---|
 | `/flight create` | Staff | Announce a flight with a Book button |
 | `/flight cancel` | Staff | Cancel a flight and DM all passengers |
-| `/flight passengers` | Staff | List who is booked |
+| `/flight passengers` | Staff | List who is booked |\n| `/flight list` | Staff | List scheduled flights |\n| `/flight edit` | Staff | Edit flight details |\n| `/flight status` | Staff | Set scheduled or departed status |\n| `/flight delay` | Staff | Delay a flight and DM passengers |\n| `/flight gate` | Staff | Set gate and notify passengers |
 | `/flights` | Everyone | See upcoming flights (private) |
 | `/mytickets` | Everyone | Your ticket history (private) |
 | `/cancelticket` | Everyone | Cancel a ticket with confirmation (private) |
