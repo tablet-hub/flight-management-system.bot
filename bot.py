@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS flights (
     guild_id      INTEGER,
     channel_id    INTEGER,
     message_id    INTEGER,
-    host_id       INTEGER
+    host_id       INTEGER,
+    gate          TEXT
 );
 CREATE TABLE IF NOT EXISTS bookings (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +133,8 @@ def flight_embed(f, booked: int) -> discord.Embed:
         e.add_field(name="Aircraft", value=f["aircraft"], inline=True)
     if f["price"]:
         e.add_field(name="Price", value=f"{f['price']:,}", inline=True)
+    if f["gate"]:
+        e.add_field(name="🛫 Gate", value=f["gate"], inline=True)
     if f["host_id"]:
         e.add_field(name="Host", value=f"<@{f['host_id']}>", inline=True)
     e.set_footer(text=f"Flight ID {f['id']} · Times shown in your local timezone")
@@ -313,6 +316,9 @@ class FlightBot(discord.Client):
         db = await aiosqlite.connect(DB_PATH)
         db.row_factory = aiosqlite.Row
         await db.executescript(SCHEMA)
+        columns = await (await db.execute("PRAGMA table_info(flights)")).fetchall()
+        if not any(row[1] == "gate" for row in columns):
+            await db.execute("ALTER TABLE flights ADD COLUMN gate TEXT")
         await db.commit()
 
         self.add_dynamic_items(BookButton)  # re-attach persistent buttons after restart
@@ -433,6 +439,104 @@ async def flight_create(
     await db.execute("UPDATE flights SET message_id = ? WHERE id = ?", (msg.id, flight_id))
     await db.commit()
     await interaction.followup.send(f"✅ Flight **{f['code']}** announced in {target.mention} (ID {flight_id}).", ephemeral=True)
+
+
+
+
+@flight_group.command(name="list", description="Staff: list scheduled flights")
+@staff_only()
+async def flight_list(interaction: discord.Interaction):
+    cur = await db.execute("SELECT * FROM flights WHERE status = 'scheduled' ORDER BY departure_ts LIMIT 20")
+    rows = await cur.fetchall()
+    if not rows:
+        return await interaction.response.send_message("No scheduled flights.", ephemeral=True)
+    lines = [f"`#{r['id']}` **{r['code']}** · {r['origin']} → {r['destination']} · <t:{r['departure_ts']}:f> · {await booked_count(r['id'])}/{r['seats']} booked" for r in rows]
+    await interaction.response.send_message(embed=discord.Embed(title="🗂️ Scheduled flights", description="\n".join(lines)[:4000], color=BLUE), ephemeral=True)
+
+
+@flight_group.command(name="edit", description="Edit flight details")
+@staff_only()
+@app_commands.describe(flight_id="Flight ID", code="New flight code", origin="New origin", destination="New destination", departure="New UTC departure: YYYY-MM-DD HH:MM", seats="New seat capacity", price="New ticket price", aircraft="New aircraft type")
+async def flight_edit(interaction: discord.Interaction, flight_id: int, code: Optional[str] = None, origin: Optional[str] = None, destination: Optional[str] = None, departure: Optional[str] = None, seats: Optional[app_commands.Range[int, 1, 1000]] = None, price: Optional[app_commands.Range[int, 0, 100000000]] = None, aircraft: Optional[str] = None):
+    f = await get_flight(flight_id)
+    if not f or f["status"] != "scheduled":
+        return await interaction.response.send_message("Flight not found or not scheduled.", ephemeral=True)
+    updates, values = [], []
+    for field, value in (("code", code), ("origin", origin), ("destination", destination), ("seats", seats), ("price", price), ("aircraft", aircraft)):
+        if value is not None:
+            updates.append(field + " = ?"); values.append(value.upper().strip() if field == "code" else value)
+    if departure is not None:
+        ts = parse_departure(departure)
+        if ts is None or ts <= now():
+            return await interaction.response.send_message("Departure must be a future UTC time in YYYY-MM-DD HH:MM format.", ephemeral=True)
+        updates.extend(["departure_ts = ?", "checkin_ts = checkin_ts + ?"])
+        values.extend([ts, ts - f["departure_ts"]])
+    if not updates:
+        return await interaction.response.send_message("Provide at least one field to change.", ephemeral=True)
+    if seats is not None and seats < await booked_count(flight_id):
+        return await interaction.response.send_message("Seat capacity cannot be below the number of current bookings.", ephemeral=True)
+    values.append(flight_id)
+    await db.execute("UPDATE flights SET " + ", ".join(updates) + " WHERE id = ?", values)
+    await db.commit()
+    await refresh_announcement(flight_id)
+    await interaction.response.send_message(f"✅ Updated flight **{code or f['code']}** (ID {flight_id}).", ephemeral=True)
+
+
+@flight_group.command(name="status", description="Update a flight's status")
+@staff_only()
+@app_commands.describe(flight_id="Flight ID", status="Choose the status")
+@app_commands.choices(status=[app_commands.Choice(name="Scheduled", value="scheduled"), app_commands.Choice(name="Departed", value="departed")])
+async def flight_status(interaction: discord.Interaction, flight_id: int, status: app_commands.Choice[str]):
+    f = await get_flight(flight_id)
+    if not f or f["status"] == "cancelled":
+        return await interaction.response.send_message("Flight not found or cancelled.", ephemeral=True)
+    await db.execute("UPDATE flights SET status = ? WHERE id = ?", (status.value, flight_id))
+    await db.commit()
+    await refresh_announcement(flight_id)
+    await interaction.response.send_message(f"✅ Flight **{f['code']}** status set to **{status.name}**.", ephemeral=True)
+
+
+@flight_group.command(name="delay", description="Delay a flight and notify booked passengers")
+@staff_only()
+@app_commands.describe(flight_id="Flight ID", minutes="Delay duration in minutes", reason="Optional reason")
+async def flight_delay(interaction: discord.Interaction, flight_id: int, minutes: app_commands.Range[int, 1, 1440], reason: str = "Operational update"):
+    f = await get_flight(flight_id)
+    if not f or f["status"] != "scheduled":
+        return await interaction.response.send_message("Flight not found or not scheduled.", ephemeral=True)
+    new_departure = f["departure_ts"] + minutes * 60
+    await db.execute("UPDATE flights SET departure_ts = ?, checkin_ts = checkin_ts + ? WHERE id = ?", (new_departure, minutes * 60, flight_id))
+    await db.commit()
+    await refresh_announcement(flight_id)
+    cur = await db.execute("SELECT user_id, ref FROM bookings WHERE flight_id = ? AND status = 'active'", (flight_id,))
+    passengers = await cur.fetchall()
+    sent = 0
+    for p in passengers:
+        e = ticket_embed(p["ref"], await get_flight(flight_id), title="⏰ Flight delay notice")
+        e.description = f"Your flight **{f['code']}** has been delayed by {minutes} minutes. Reason: {reason}"
+        if await dm_user(p["user_id"], e): sent += 1
+        await asyncio.sleep(0.4)
+    await interaction.response.send_message(f"✅ Flight **{f['code']}** delayed {minutes} minutes. DMs sent: {sent}/{len(passengers)}.", ephemeral=True)
+
+
+@flight_group.command(name="gate", description="Set or update the flight gate")
+@staff_only()
+@app_commands.describe(flight_id="Flight ID", gate="Gate designation, e.g. A12")
+async def flight_gate(interaction: discord.Interaction, flight_id: int, gate: str):
+    f = await get_flight(flight_id)
+    if not f:
+        return await interaction.response.send_message("Flight not found.", ephemeral=True)
+    await db.execute("UPDATE flights SET gate = ? WHERE id = ?", (gate.strip().upper(), flight_id))
+    await db.commit()
+    await refresh_announcement(flight_id)
+    cur = await db.execute("SELECT user_id, ref FROM bookings WHERE flight_id = ? AND status = 'active'", (flight_id,))
+    passengers = await cur.fetchall()
+    sent = 0
+    for p in passengers:
+        e = ticket_embed(p["ref"], await get_flight(flight_id), title="🛫 Gate assigned")
+        e.description = f"Gate for flight **{f['code']}** is now **{gate.strip().upper()}**."
+        if await dm_user(p["user_id"], e): sent += 1
+        await asyncio.sleep(0.4)
+    await interaction.response.send_message(f"✅ Gate updated to **{gate.strip().upper()}**. Passenger DMs sent: {sent}/{len(passengers)}.", ephemeral=True)
 
 
 @flight_group.command(name="cancel", description="Cancel a flight and notify all passengers")
